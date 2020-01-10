@@ -2,6 +2,14 @@ import cv2
 import numpy as np
 import math
 
+"""
+def InversePerspectiveMapping(img_input, transMat):
+    
+    img_output = np.zeros(img_input.shape, np.uint8)
+    img_output = cv2.warpPerspective(img_input, transMat, img_input.shape[0:2])
+    return img_output
+"""
+
 
 cam = cv2.VideoCapture(-1) # For Raspberry-pi :-1 / Laptop : 0
 
@@ -29,7 +37,7 @@ ipm = np.zeros((int(H),int(W),3),np.uint8)
 
 while(1):
     ret, frame = cam.read()
-    ipm = cv2.warpPerspective(frame,P,(int(W),int(H)))
+    ipm = cv2.warpPerspective(frame,P,frame.shape[0:2])
     cv2.imshow('ipm',ipm)
     if(cv2.waitKey(10)==27): break
 
