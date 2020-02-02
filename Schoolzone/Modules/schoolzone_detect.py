@@ -6,9 +6,16 @@ CalibParas : [CamMat, DistMat]
 """
 
 # import modules
+import os
+import argparse
 import cv2
 import numpy as np
 import math
+import sys
+import glob
+import importlib.util
+from tflite_runtime.interpreter import Interpreter
+from tflite_runtime.interpreter import load_delegate
 
 ##################################################################################################################
 ###################################### define functions #################################
@@ -48,28 +55,20 @@ def cal_ipm_bg(camParas,ipmParas):
     
     return bgMask
     
-def setup_ssd_edgetpu(args):
+def setup_ssd_edgetpu(modelParas):
     # Get Args
-    MODEL_NAME = args.modeldir
-    GRAPH_NAME = args.graph
-    LABELMAP_NAME = args.labels
-    min_conf_threshold = float(args.threshold)
-    resW, resH = args.resolution.split('x')
+    MODEL_NAME = modelParas[0]
+    GRAPH_NAME = modelParas[1]
+    LABELMAP_NAME = modelParas[2]
+    min_conf_threshold = float(modelParas[3])
+    resW, resH = modelParas[4:6]
     imW, imH = int(resW), int(resH)
-    use_TPU = args.edgetpu
+    use_TPU = modelParas[6]
     
     # Import TensorFlow libraries
     # If tensorflow is not installed, import interpreter from tflite_runtime, else import from regular tensorflow
     # If using Coral Edge TPU, import the load_delegate library
-    pkg = importlib.util.find_spec('tensorflow')
-    if pkg is None:
-        from tflite_runtime.interpreter import Interpreter
-        if use_TPU:
-            from tflite_runtime.interpreter import load_delegate
-    else:
-        from tensorflow.lite.python.interpreter import Interpreter
-        if use_TPU:
-            from tensorflow.lite.python.interpreter import load_delegate
+    
 
     # If using Edge TPU, assign filename for Edge TPU model
     if use_TPU:
@@ -118,17 +117,7 @@ def setup_ssd_edgetpu(args):
     input_mean = 127.5
     input_std = 127.5
     
-    tfParas[0] = height
-    tfParas[1] = width
-    tfParas[2] = floating_model
-    tfParas[3] = input_data
-    tfParas[4] = input_mean
-    tfParas[5] = input_std
-    tfParas[6] = inpput_details
-    tfParas[7] = min_conf_threshold
-    tfParas[8] = imH
-    tfParas[9] = imW
-    tfParas[10] = labels
+    tfParas = [height, width, floating_model, labels, input_mean, input_std, input_details, min_conf_threshold, imH, imW, interpreter, output_details]
     
     
     return tfParas
@@ -183,14 +172,16 @@ def detect_stopline(mask_k, tfParas):    # From EdjeElectronics
     height = tfParas[0]
     width = tfParas[1]
     floating_model = tfParas[2]
-    input_data = tfParas[3]
+    labels = tfParas[3]
     input_mean = tfParas[4]
     input_std = tfParas[5]
-    inpput_details = tfParas[6]
+    input_details = tfParas[6]
     min_conf_threshold = tfParas[7]
     imH = tfParas[8]
     imW = tfParas[9]
-    labels = tfParas[10]
+    interpreter = tfParas[10]
+    output_details = tfParas[11]
+    
     
     # Get image & preprocessing
     frame = cv2.cvtColor(mask_k, cv2.COLOR_GRAY2RGB)
@@ -211,14 +202,16 @@ def detect_stopline(mask_k, tfParas):    # From EdjeElectronics
     classes = interpreter.get_tensor(output_details[1]['index'])[0] # Class index of detected objects
     scores = interpreter.get_tensor(output_details[2]['index'])[0] # Confidence of detected objects
     #num = interpreter.get_tensor(output_details[3]['index'])[0]  # Total number of detected objects (inaccurate and not needed)
-
+    state_stopline = 0
     # Loop over all detections and draw detection box if confidence is above minimum threshold
     for i in range(len(scores)):
         if ((scores[i] > min_conf_threshold) and (scores[i] <= 1.0)):
+            """
             print("Detected : ",labels[int(classes[i])])
+            """
             if(labels[int(classes[i])] == "stopline"): state_stopline = 1
             else: state_stopline = 0
-            """
+            
 
             # Get bounding box coordinates and draw box
             # Interpreter can return coordinates that are outside of image dimensions, need to force them to be within image using max() and min()
@@ -236,7 +229,9 @@ def detect_stopline(mask_k, tfParas):    # From EdjeElectronics
             label_ymin = max(ymin, labelSize[1] + 10) # Make sure not to draw label too close to top of window
             cv2.rectangle(frame, (xmin, label_ymin-labelSize[1]-10), (xmin+labelSize[0], label_ymin+baseLine-10), (255, 255, 255), cv2.FILLED) # Draw white box to put label text in
             cv2.putText(frame, label, (xmin, label_ymin-7), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2) # Draw label text
-            """
+            
+    cv2.imshow('show',frame)
+    cv2.waitKey(0)
     return state_stopline
 ###                                                                                                            ###
 ##################################################################################################################
@@ -245,7 +240,7 @@ def detect_stopline(mask_k, tfParas):    # From EdjeElectronics
 ##################################################################################################################
 ##################################  Integrated Modules  #################################
 ##################################################################################################################
-def pre_process(image, calibParas, ipmParas, bgMask):  # & loop
+def pre_process(image, calibParas, ipmParas, bgMask, tfParas):  # & loop
     # Get Parameters
     H, W = image.shape[0:2]
     ipmMat = ipmParas
@@ -288,9 +283,9 @@ def pre_process(image, calibParas, ipmParas, bgMask):  # & loop
     # Detect Stopline
     if(state_schoolzone == 1):
         print("schoolzone!")        
-        #state_stopline = detect_stopline(mask[1])
-        #if(state_stoplilne == 1):
-            #print("Stopline!")
+        state_stopline = detect_stopline(mask[1],tfParas)
+        if(state_stopline == 1):
+            print("Stopline!")
             
     
     
@@ -382,9 +377,11 @@ if __name__ == '__main__':
     DistMat = np.array([ -0.332015,	0.108453,	0.001100,	0.002183],dtype='f')
     calibParas = [CamMat, DistMat]
     H, W = image.shape[0:2]
+    modelParas = ['model_rev3', 'detect.tflite', 'labelmap.txt',0.8,W,H,True]
     camParas = [(8-90)*np.pi/180, (0)*np.pi/180, (0)*np.pi/180, 300, 500, H, W]
     ipmParas = cal_trans_mat(camParas)
+    tfParas = setup_ssd_edgetpu(modelParas)
     bgMask = cal_ipm_bg(camParas,ipmParas)
-    pre_process(image, calibParas, ipmParas, bgMask)
+    pre_process(image, calibParas, ipmParas, bgMask, tfParas)
     
     
