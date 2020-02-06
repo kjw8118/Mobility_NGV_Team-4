@@ -5,6 +5,7 @@ class X4:
     from PyLidar3 import YdLidarX4 as pylidar
     import cv2
     import numpy as np
+    import math
     
     def __init__(self, port):
 
@@ -48,23 +49,43 @@ class X4:
             else:
                 self.distance[i] = data_dict[i]
         t2 = self.cv2.getTickCount()
-        self.fps = self.freq/(t2-t1)        
+        self.fps = self.freq/(t2-t1)
+    def getCartesian(self):
+        self.x = self.np.full(360,0)
+        self.y = self.np.full(360,0)
+        for i in range(0,360):
+            self.x[i] = self.distance[i] * self.math.cos(self.math.radians(i))
+            self.y[i] = self.distance[i] * self.math.sin(self.math.radians(i))
+            
+    def veiwMap(self, res, boundary):
+        self.map = self.np.full(res,255,dtype='uint8')
+        self.cv2.circle(self.map,(int(res[1]/2),int(res[0]/2)),1,(0,0),1)
+        for i in range(0,360):
+            if(self.distance[i] <= boundary):
+                self.cv2.circle(self.map,(int(self.x[i]/(2*boundary)*res[1]+res[1]/2),int(self.y[i]/(2*boundary)*res[0]+res[0]/2)),1,(0,0),-1)
+        self.cv2.imshow('veiwMap',self.map)
+        
+        
 
 
 
 
 if __name__ == '__main__':
-	port = "COM10"
-	print("Generate Instance")
-	Lidar = X4(port)
-	now = time.time()
-	print("Initialize X4")
-	if(Lidar.init()):
-		while((time.time()-now)<= 30):
-			Lidar.scan()
-			print(Lidar.distance)
-		Lidar.stop()
-		print("Scan is end")
-	else: print("Not Connected")
+    import cv2
+    port = "/dev/ttyUSB0"
+    print("Generate Instance")
+    Lidar = X4(port)
+    now = time.time()
+    print("Initialize X4")
+    if(Lidar.init()):
+        while((time.time()-now)<= 30):
+            Lidar.scanFiltered(15)
+            Lidar.getCartesian()
+            Lidar.veiwMap([800,800], 3000)
+            #print(Lidar.distance)
+            if(cv2.waitKey(1) == 27): break
+        Lidar.stop()
+        print("Scan is end")
+    else: print("Not Connected")
 
 
